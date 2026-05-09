@@ -859,6 +859,11 @@ func buildEinoRunResultFromAccumulated(
 			cleaned = UnwrapPlanExecuteUserText(cleaned)
 		}
 	}
+	if cleaned == "" {
+		if fb := strings.TrimSpace(einoExtractFallbackAssistantFromMsgs(runAccumulatedMsgs)); fb != "" {
+			cleaned = fb
+		}
+	}
 	cleaned = dedupeRepeatedParagraphs(cleaned, 80)
 	cleaned = dedupeParagraphsByLineFingerprint(cleaned, 100)
 	// 防止超长响应导致 JSON 序列化慢或 OOM（多代理拼接大量工具输出时可能触发）。
@@ -883,6 +888,79 @@ func buildEinoRunResultFromAccumulated(
 		out.LastAgentTraceOutput = out.Response
 	}
 	return out
+}
+
+// einoExtractFallbackAssistantFromMsgs 在「主通道未产出助手正文」时，从 Eino ADK 轨迹中回填用户可见回复。
+// 典型场景：监督者仅调用 exit（final_result 落在 Tool 消息中），或工具结果已写入历史但 lastAssistant 未更新。
+//
+// 优先级：最后一次 exit 工具输出 → 最后一条含 exit 的助手 tool_calls 参数中的 final_result。
+func einoExtractFallbackAssistantFromMsgs(msgs []adk.Message) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if m == nil || m.Role != schema.Tool {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(m.ToolName), adk.ToolInfoExit.Name) {
+			continue
+		}
+		content := strings.TrimSpace(m.Content)
+		if content == "" || strings.HasPrefix(content, einomcp.ToolErrorPrefix) {
+			continue
+		}
+		return content
+	}
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if m == nil || m.Role != schema.Assistant {
+			continue
+		}
+		if s := einoExtractExitFinalFromAssistantToolCalls(m); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func einoExtractExitFinalFromAssistantToolCalls(msg *schema.Message) string {
+	if msg == nil || len(msg.ToolCalls) == 0 {
+		return ""
+	}
+	for i := len(msg.ToolCalls) - 1; i >= 0; i-- {
+		tc := msg.ToolCalls[i]
+		if !strings.EqualFold(strings.TrimSpace(tc.Function.Name), adk.ToolInfoExit.Name) {
+			continue
+		}
+		if s := einoParseExitFinalResultArguments(tc.Function.Arguments); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func einoParseExitFinalResultArguments(arguments string) string {
+	arguments = strings.TrimSpace(arguments)
+	if arguments == "" {
+		return ""
+	}
+	var wrap struct {
+		FinalResult json.RawMessage `json:"final_result"`
+	}
+	if err := json.Unmarshal([]byte(arguments), &wrap); err != nil || len(wrap.FinalResult) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(wrap.FinalResult, &s); err == nil {
+		return strings.TrimSpace(s)
+	}
+	var anyVal interface{}
+	if err := json.Unmarshal(wrap.FinalResult, &anyVal); err != nil {
+		return ""
+	}
+	b, err := json.Marshal(anyVal)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }
 
 func buildEinoCheckpointID(orchMode string) string {
