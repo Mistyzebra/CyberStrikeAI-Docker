@@ -18,6 +18,17 @@ func MainWebUIUsesHTTPS(s *ServerConfig) bool {
 	return cert != "" && key != ""
 }
 
+// ServerHTTPRedirectEnabled 是否在主站启用 HTTPS 时把明文 HTTP 请求重定向到 HTTPS（默认开启）。
+func ServerHTTPRedirectEnabled(s *ServerConfig) bool {
+	if s == nil || !MainWebUIUsesHTTPS(s) {
+		return false
+	}
+	if s.TLSHTTPRedirect == nil {
+		return true
+	}
+	return *s.TLSHTTPRedirect
+}
+
 // ApplyDevHTTPSBootstrap 供 --https / 一键脚本使用：强制开启主站 TLS。
 // 若已配置 tls_cert_path 与 tls_key_path 则仅用 PEM，不开启自签；否则启用 tls_auto_self_sign（内存证书，仅本地测试）。
 func ApplyDevHTTPSBootstrap(cfg *Config) {
