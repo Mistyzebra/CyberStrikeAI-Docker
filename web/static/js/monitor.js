@@ -2511,6 +2511,7 @@ async function attachRunningTaskEventStream(conversationId) {
 
 window.attachRunningTaskEventStream = attachRunningTaskEventStream;
 window.taskReplayProgressId = taskReplayProgressId;
+window.expandProcessDetailsTimeline = expandProcessDetailsTimeline;
 
 /** 从工具参数提取短摘要（URL/命令等），便于同名工具批量调用时区分 */
 function parseToolCallArgsFromData(data) {

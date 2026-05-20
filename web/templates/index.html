@@ -2144,12 +2144,15 @@
                                             <small class="form-hint" data-i18n="settingsBasic.multiAgentPeLoopHint">仅 orchestration=plan_execute 时有效；execute 与 replan 之间的最大轮次。</small>
                                         </div>
                                         <div class="form-group">
-                                            <label class="checkbox-label">
-                                                <input type="checkbox" id="multi-agent-robot-use" class="modern-checkbox" />
-                                                <span class="checkbox-custom"></span>
-                                                <span class="checkbox-text" data-i18n="settingsBasic.multiAgentRobotUse">企业微信 / 钉钉 / 飞书机器人也使用多代理</span>
-                                            </label>
-                                            <small class="form-hint" data-i18n="settingsBasic.multiAgentRobotUseHint">需同时勾选「启用多代理」；调用量与成本更高。</small>
+                                            <label for="multi-agent-robot-mode" data-i18n="settingsBasic.multiAgentRobotMode">机器人默认对话模式</label>
+                                            <select id="multi-agent-robot-mode" class="form-select">
+                                                <option value="react" data-i18n="chat.agentModeReactNative">原生 ReAct</option>
+                                                <option value="eino_single" data-i18n="chat.agentModeEinoSingle">Eino 单代理（ADK）</option>
+                                                <option value="deep" data-i18n="chat.agentModeDeep">Deep（DeepAgent）</option>
+                                                <option value="plan_execute" data-i18n="chat.agentModePlanExecuteLabel">Plan-Execute</option>
+                                                <option value="supervisor" data-i18n="chat.agentModeSupervisorLabel">Supervisor</option>
+                                            </select>
+                                            <small class="form-hint" data-i18n="settingsBasic.multiAgentRobotModeHint">企业微信 / 钉钉 / 飞书机器人每条消息使用的执行模式；Deep / Plan-Execute / Supervisor 需启用多代理。</small>
                                         </div>
                                     </div>
                                 </div>

@@ -3064,6 +3064,27 @@ function getConversationGroup(dateObj, todayStart, sevenDaysCutoff, yesterdaySta
 }
 
 // 加载对话
+/** 轻量加载会话后，拉取最后一条助手消息的 process_details（机器人等无 SSE 场景） */
+async function prefetchLastAssistantProcessDetails() {
+    const nodes = document.querySelectorAll('#chat-messages .message.assistant');
+    if (!nodes.length) return;
+    const last = nodes[nodes.length - 1];
+    if (!last || !last.id) return;
+    const container = document.getElementById('process-details-' + last.id);
+    if (!container || container.dataset.lazyNotLoaded !== '1') return;
+    const backendId = last.dataset && last.dataset.backendMessageId;
+    if (!backendId || typeof apiFetch !== 'function') return;
+    const res = await apiFetch('/api/messages/' + encodeURIComponent(String(backendId)) + '/process-details');
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || !Array.isArray(j.processDetails) || j.processDetails.length === 0) return;
+    if (typeof renderProcessDetails === 'function') {
+        renderProcessDetails(last.id, j.processDetails);
+    }
+    if (typeof window.expandProcessDetailsTimeline === 'function') {
+        window.expandProcessDetailsTimeline(last.id);
+    }
+}
+
 async function loadConversation(conversationId) {
     const seq = ++loadConversationRequestSeq;
     try {
@@ -3283,6 +3304,11 @@ async function loadConversation(conversationId) {
                 .catch((e) => {
                     console.warn('attachRunningTaskEventStream on loadConversation failed', e);
                 });
+        } else if (seq === loadConversationRequestSeq && currentConversationId === conversationId) {
+            // 机器人等非 Web 流式来源：会话已结束或未注册任务时，按需拉取最后一条助手消息的过程详情
+            prefetchLastAssistantProcessDetails().catch((e) => {
+                console.warn('prefetchLastAssistantProcessDetails failed', e);
+            });
         }
     } catch (error) {
         console.error('加载对话失败:', error);
