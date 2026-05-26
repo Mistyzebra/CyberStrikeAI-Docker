@@ -176,6 +176,10 @@ func RegisterBatchTaskMCPTools(mcpServer *mcp.Server, h *AgentHandler, logger *z
 					"type":        "boolean",
 					"description": "创建后是否立即开始执行队列，默认 false（pending，需 batch_task_start）",
 				},
+				"project_id": map[string]interface{}{
+					"type":        "string",
+					"description": "队列内子对话绑定的项目 ID（可选，未指定时使用 config.project.default_project_id）",
+				},
 			},
 		},
 	}, func(ctx context.Context, args map[string]interface{}) (*mcp.ToolResult, error) {
@@ -204,7 +208,8 @@ func RegisterBatchTaskMCPTools(mcpServer *mcp.Server, h *AgentHandler, logger *z
 		if !ok {
 			executeNow = false
 		}
-		queue, createErr := h.batchTaskManager.CreateBatchQueue(title, role, agentMode, scheduleMode, cronExpr, nextRunAt, tasks)
+		projectID := strings.TrimSpace(mcpArgString(args, "project_id"))
+		queue, createErr := h.batchTaskManager.CreateBatchQueue(title, role, agentMode, scheduleMode, cronExpr, projectID, nextRunAt, tasks)
 		if createErr != nil {
 			return batchMCPTextResult("创建队列失败: "+createErr.Error(), true), nil
 		}

@@ -222,6 +222,7 @@ type ChatReasoningRequest struct {
 type ChatRequest struct {
 	Message              string           `json:"message" binding:"required"`
 	ConversationID       string           `json:"conversationId,omitempty"`
+	ProjectID            string           `json:"projectId,omitempty"` // 新对话绑定的项目（可选；未指定时可用 config.project.default_project_id）
 	Role                 string           `json:"role,omitempty"` // 角色名称
 	Attachments          []ChatAttachment `json:"attachments,omitempty"`
 	WebShellConnectionID string           `json:"webshellConnectionId,omitempty"` // WebShell 管理 - AI 助手：当前选中的连接 ID，仅使用 webshell_* 工具
@@ -560,7 +561,9 @@ func (h *AgentHandler) AgentLoop(c *gin.Context) {
 	conversationID := req.ConversationID
 	if conversationID == "" {
 		title := safeTruncateString(req.Message, 50)
-		conv, err := h.db.CreateConversation(title, audit.ConversationCreateMetaFromGin(c, "agent_loop"))
+		meta := audit.ConversationCreateMetaFromGin(c, "agent_loop")
+		meta.ProjectID = effectiveProjectID(h.config, req.ProjectID)
+		conv, err := h.db.CreateConversation(title, meta)
 		if err != nil {
 			h.logger.Error("创建对话失败", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -635,6 +638,8 @@ func (h *AgentHandler) AgentLoop(c *gin.Context) {
 			builtin.ToolWebshellFileRead,
 			builtin.ToolWebshellFileWrite,
 			builtin.ToolRecordVulnerability,
+			builtin.ToolListVulnerabilities,
+			builtin.ToolGetVulnerability,
 			builtin.ToolListKnowledgeRiskTypes,
 			builtin.ToolSearchKnowledgeBase,
 		}
@@ -682,7 +687,7 @@ func (h *AgentHandler) AgentLoop(c *gin.Context) {
 	taskCtx = h.injectReactHITLInterceptor(taskCtx, cancelWithCause, conversationID, "", nil)
 
 	// 执行Agent Loop，传入历史消息和对话ID（使用包含角色提示词的finalMessage和角色工具列表）
-	result, err := h.agent.AgentLoopWithProgress(taskCtx, finalMessage, agentHistoryMessages, conversationID, progressCallback, roleTools)
+	result, err := h.agent.AgentLoopWithProgress(taskCtx, finalMessage, agentHistoryMessages, conversationID, progressCallback, roleTools, h.projectBlackboardBlock(conversationID))
 	if err != nil {
 		h.logger.Error("Agent Loop执行失败", zap.Error(err))
 
@@ -760,7 +765,9 @@ func (h *AgentHandler) ProcessMessageForRobot(ctx context.Context, platform, con
 		if strings.TrimSpace(platform) != "" {
 			src = "robot:" + strings.TrimSpace(platform)
 		}
-		conv, createErr := h.db.CreateConversation(title, audit.ConversationCreateMeta(src))
+		meta := audit.ConversationCreateMeta(src)
+		meta.ProjectID = effectiveProjectID(h.config, "")
+		conv, createErr := h.db.CreateConversation(title, meta)
 		if createErr != nil {
 			return "", "", fmt.Errorf("创建对话失败: %w", createErr)
 		}
@@ -839,7 +846,7 @@ func (h *AgentHandler) ProcessMessageForRobot(ctx context.Context, platform, con
 		for {
 			resultMA, errMA = multiagent.RunEinoSingleChatModelAgent(
 				taskCtx, h.config, &h.config.MultiAgent, h.agent, h.logger,
-				conversationID, curMsg, curHist, roleTools, progressCallback, nil,
+				conversationID, curMsg, curHist, roleTools, progressCallback, nil, h.projectBlackboardBlock(conversationID),
 			)
 			if errMA == nil {
 				// 成功后重置 transient 重试窗口，下一次分段从第 1 次重试开始。
@@ -872,7 +879,7 @@ func (h *AgentHandler) ProcessMessageForRobot(ctx context.Context, platform, con
 			resultMA, errMA = multiagent.RunDeepAgent(
 				taskCtx, h.config, &h.config.MultiAgent, h.agent, h.logger,
 				conversationID, curMsg, curHist, roleTools, progressCallback,
-				h.agentsMarkdownDir, robotMode, nil,
+				h.agentsMarkdownDir, robotMode, nil, h.projectBlackboardBlock(conversationID),
 			)
 			if errMA == nil {
 				// 成功后重置 transient 重试窗口，下一次分段从第 1 次重试开始。
@@ -891,7 +898,7 @@ func (h *AgentHandler) ProcessMessageForRobot(ctx context.Context, platform, con
 		return h.finalizeRobotAgentSuccess(assistantMessageID, conversationID, resultMA)
 	}
 
-	result, err := h.agent.AgentLoopWithProgress(taskCtx, finalMessage, agentHistoryMessages, conversationID, progressCallback, roleTools)
+	result, err := h.agent.AgentLoopWithProgress(taskCtx, finalMessage, agentHistoryMessages, conversationID, progressCallback, roleTools, h.projectBlackboardBlock(conversationID))
 	if err != nil {
 		taskStatus = "failed"
 		errMsg := "执行失败: " + err.Error()
@@ -1518,6 +1525,7 @@ func (h *AgentHandler) AgentLoopStream(c *gin.Context) {
 		var conv *database.Conversation
 		var err error
 		meta := audit.ConversationCreateMetaFromGin(c, "agent_loop_stream")
+		meta.ProjectID = effectiveProjectID(h.config, req.ProjectID)
 		if req.WebShellConnectionID != "" {
 			meta.Source = "webshell_chat"
 			conv, err = h.db.CreateConversationWithWebshell(strings.TrimSpace(req.WebShellConnectionID), title, meta)
@@ -1595,6 +1603,8 @@ func (h *AgentHandler) AgentLoopStream(c *gin.Context) {
 			builtin.ToolWebshellFileRead,
 			builtin.ToolWebshellFileWrite,
 			builtin.ToolRecordVulnerability,
+			builtin.ToolListVulnerabilities,
+			builtin.ToolGetVulnerability,
 			builtin.ToolListKnowledgeRiskTypes,
 			builtin.ToolSearchKnowledgeBase,
 		}
@@ -1725,7 +1735,7 @@ func (h *AgentHandler) AgentLoopStream(c *gin.Context) {
 	go sseKeepalive(c, stopKeepalive, &sseWriteMu)
 	defer close(stopKeepalive)
 
-	result, err := h.agent.AgentLoopWithProgress(taskCtx, finalMessage, agentHistoryMessages, conversationID, progressCallback, roleTools)
+	result, err := h.agent.AgentLoopWithProgress(taskCtx, finalMessage, agentHistoryMessages, conversationID, progressCallback, roleTools, h.projectBlackboardBlock(conversationID))
 	if err != nil {
 		h.logger.Error("Agent Loop执行失败", zap.Error(err))
 		cause := context.Cause(baseCtx)
@@ -2037,6 +2047,7 @@ type BatchTaskRequest struct {
 	ScheduleMode string   `json:"scheduleMode,omitempty"`   // manual | cron
 	CronExpr     string   `json:"cronExpr,omitempty"`       // scheduleMode=cron 时必填
 	ExecuteNow   bool     `json:"executeNow,omitempty"`     // 创建后是否立即执行（默认 false）
+	ProjectID    string   `json:"projectId,omitempty"`      // 队列内子对话绑定的项目（可选）
 }
 
 func normalizeBatchQueueAgentMode(mode string) string {
@@ -2117,7 +2128,7 @@ func (h *AgentHandler) CreateBatchQueue(c *gin.Context) {
 		nextRunAt = &next
 	}
 
-	queue, createErr := h.batchTaskManager.CreateBatchQueue(req.Title, req.Role, agentMode, scheduleMode, cronExpr, nextRunAt, validTasks)
+	queue, createErr := h.batchTaskManager.CreateBatchQueue(req.Title, req.Role, agentMode, scheduleMode, cronExpr, req.ProjectID, nextRunAt, validTasks)
 	if createErr != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": createErr.Error()})
 		return
@@ -2651,7 +2662,9 @@ func (h *AgentHandler) executeBatchQueue(queueID string) {
 
 		// 创建新对话
 		title := safeTruncateString(task.Message, 50)
-		conv, err := h.db.CreateConversation(title, audit.ConversationCreateMeta("batch_task"))
+		batchMeta := audit.ConversationCreateMeta("batch_task")
+		batchMeta.ProjectID = effectiveProjectID(h.config, queue.ProjectID)
+		conv, err := h.db.CreateConversation(title, batchMeta)
 		var conversationID string
 		if err != nil {
 			h.logger.Error("创建对话失败", zap.String("queueId", queueID), zap.String("taskId", task.ID), zap.Error(err))
@@ -2801,15 +2814,15 @@ func (h *AgentHandler) executeBatchQueue(queueID string) {
 			var runErr error
 			switch {
 			case useBatchMulti:
-				resultMA, runErr = multiagent.RunDeepAgent(taskCtx, h.config, &h.config.MultiAgent, h.agent, h.logger, conversationID, finalMessage, []agent.ChatMessage{}, roleTools, progressCallback, h.agentsMarkdownDir, batchOrch, nil)
+				resultMA, runErr = multiagent.RunDeepAgent(taskCtx, h.config, &h.config.MultiAgent, h.agent, h.logger, conversationID, finalMessage, []agent.ChatMessage{}, roleTools, progressCallback, h.agentsMarkdownDir, batchOrch, nil, h.projectBlackboardBlock(conversationID))
 			case useEinoSingle:
 				if h.config == nil {
 					runErr = fmt.Errorf("服务器配置未加载")
 				} else {
-					resultMA, runErr = multiagent.RunEinoSingleChatModelAgent(taskCtx, h.config, &h.config.MultiAgent, h.agent, h.logger, conversationID, finalMessage, []agent.ChatMessage{}, roleTools, progressCallback, nil)
+					resultMA, runErr = multiagent.RunEinoSingleChatModelAgent(taskCtx, h.config, &h.config.MultiAgent, h.agent, h.logger, conversationID, finalMessage, []agent.ChatMessage{}, roleTools, progressCallback, nil, h.projectBlackboardBlock(conversationID))
 				}
 			default:
-				result, runErr = h.agent.AgentLoopWithProgress(taskCtx, finalMessage, []agent.ChatMessage{}, conversationID, progressCallback, roleTools)
+				result, runErr = h.agent.AgentLoopWithProgress(taskCtx, finalMessage, []agent.ChatMessage{}, conversationID, progressCallback, roleTools, h.projectBlackboardBlock(conversationID))
 			}
 
 			if runErr != nil {

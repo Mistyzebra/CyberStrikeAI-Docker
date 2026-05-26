@@ -230,6 +230,7 @@ func (h *AgentHandler) EinoSingleAgentLoopStream(c *gin.Context) {
 			roleTools,
 			progressCallback,
 			chatReasoningToClientIntent(req.Reasoning),
+			h.projectBlackboardBlock(conversationID),
 		)
 
 		if result != nil && len(result.MCPExecutionIDs) > 0 {
@@ -429,6 +430,7 @@ func (h *AgentHandler) EinoSingleAgentLoop(c *gin.Context) {
 		prep.RoleTools,
 		progressCallback,
 		chatReasoningToClientIntent(req.Reasoning),
+		h.projectBlackboardBlock(prep.ConversationID),
 	)
 	if runErr != nil {
 		if shouldPersistEinoAgentTraceAfterRunError(baseCtx) {

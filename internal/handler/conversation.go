@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"cyberstrike-ai/internal/audit"
 	"cyberstrike-ai/internal/database"
@@ -33,7 +34,13 @@ func NewConversationHandler(db *database.DB, logger *zap.Logger) *ConversationHa
 
 // CreateConversationRequest 创建对话请求
 type CreateConversationRequest struct {
-	Title string `json:"title"`
+	Title     string `json:"title"`
+	ProjectID string `json:"projectId,omitempty"`
+}
+
+// SetConversationProjectRequest 设置对话所属项目
+type SetConversationProjectRequest struct {
+	ProjectID string `json:"projectId"` // 空字符串表示解除绑定
 }
 
 // CreateConversation 创建新对话
@@ -49,7 +56,9 @@ func (h *ConversationHandler) CreateConversation(c *gin.Context) {
 		title = "新对话"
 	}
 
-	conv, err := h.db.CreateConversation(title, audit.ConversationCreateMetaFromGin(c, "api"))
+	meta := audit.ConversationCreateMetaFromGin(c, "api")
+	meta.ProjectID = strings.TrimSpace(req.ProjectID)
+	conv, err := h.db.CreateConversation(title, meta)
 	if err != nil {
 		h.logger.Error("创建对话失败", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -57,6 +66,25 @@ func (h *ConversationHandler) CreateConversation(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, conv)
+}
+
+// SetConversationProject 设置或清除对话绑定的项目
+func (h *ConversationHandler) SetConversationProject(c *gin.Context) {
+	id := c.Param("id")
+	var req SetConversationProjectRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if _, err := h.db.GetConversation(id); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "对话不存在"})
+		return
+	}
+	if err := h.db.SetConversationProjectID(id, req.ProjectID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "projectId": strings.TrimSpace(req.ProjectID)})
 }
 
 // ListConversations 列出对话

@@ -65,6 +65,7 @@ type BatchTaskQueue struct {
 	LastScheduleTriggerAt *time.Time   `json:"lastScheduleTriggerAt,omitempty"`
 	LastScheduleError     string       `json:"lastScheduleError,omitempty"`
 	LastRunError          string       `json:"lastRunError,omitempty"`
+	ProjectID             string       `json:"projectId,omitempty"`
 	Tasks                 []*BatchTask `json:"tasks"`
 	Status                string       `json:"status"` // pending, running, paused, completed, cancelled
 	CreatedAt             time.Time    `json:"createdAt"`
@@ -103,7 +104,7 @@ func (m *BatchTaskManager) SetDB(db *database.DB) {
 
 // CreateBatchQueue 创建批量任务队列
 func (m *BatchTaskManager) CreateBatchQueue(
-	title, role, agentMode, scheduleMode, cronExpr string,
+	title, role, agentMode, scheduleMode, cronExpr, projectID string,
 	nextRunAt *time.Time,
 	tasks []string,
 ) (*BatchTaskQueue, error) {
@@ -126,6 +127,7 @@ func (m *BatchTaskManager) CreateBatchQueue(
 		ID:              queueID,
 		Title:           title,
 		Role:            role,
+		ProjectID:       strings.TrimSpace(projectID),
 		AgentMode:       normalizeBatchQueueAgentMode(agentMode),
 		ScheduleMode:    normalizeBatchQueueScheduleMode(scheduleMode),
 		CronExpr:        strings.TrimSpace(cronExpr),
@@ -171,6 +173,7 @@ func (m *BatchTaskManager) CreateBatchQueue(
 			queue.ScheduleMode,
 			queue.CronExpr,
 			queue.NextRunAt,
+			queue.ProjectID,
 			dbTasks,
 		); err != nil {
 			m.logger.Warn("batch queue DB create failed", zap.String("queueId", queueID), zap.Error(err))
@@ -262,6 +265,9 @@ func (m *BatchTaskManager) loadQueueFromDB(queueID string) *BatchTaskQueue {
 	}
 	if queueRow.LastRunError.Valid {
 		queue.LastRunError = strings.TrimSpace(queueRow.LastRunError.String)
+	}
+	if queueRow.ProjectID.Valid {
+		queue.ProjectID = strings.TrimSpace(queueRow.ProjectID.String)
 	}
 	if queueRow.StartedAt.Valid {
 		queue.StartedAt = &queueRow.StartedAt.Time
@@ -498,6 +504,9 @@ func (m *BatchTaskManager) LoadFromDB() error {
 		}
 		if queueRow.LastRunError.Valid {
 			queue.LastRunError = strings.TrimSpace(queueRow.LastRunError.String)
+		}
+		if queueRow.ProjectID.Valid {
+			queue.ProjectID = strings.TrimSpace(queueRow.ProjectID.String)
 		}
 		if queueRow.StartedAt.Valid {
 			queue.StartedAt = &queueRow.StartedAt.Time

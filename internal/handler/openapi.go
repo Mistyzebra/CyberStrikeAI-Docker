@@ -73,7 +73,21 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 							"description": "对话标题",
 							"example":     "Web应用安全测试",
 						},
+						"projectId": map[string]interface{}{
+							"type":        "string",
+							"description": "绑定的项目 ID（可选，共享事实黑板）",
+						},
 					},
+				},
+				"SetConversationProjectRequest": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"projectId": map[string]interface{}{
+							"type":        "string",
+							"description": "项目 ID；空字符串表示解除绑定",
+						},
+					},
+					"required": []string{"projectId"},
 				},
 				"Conversation": map[string]interface{}{
 					"type": "object",
@@ -97,6 +111,10 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 							"type":        "string",
 							"format":      "date-time",
 							"description": "更新时间",
+						},
+						"projectId": map[string]interface{}{
+							"type":        "string",
+							"description": "绑定的项目 ID（可选）",
 						},
 					},
 				},
@@ -1326,6 +1344,37 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 					},
 				},
 			},
+			"/api/conversations/{id}/project": map[string]interface{}{
+				"put": map[string]interface{}{
+					"tags":        []string{"对话管理"},
+					"summary":     "设置对话所属项目",
+					"description": "绑定或解除对话与项目的关联，用于共享事实黑板",
+					"operationId": "setConversationProject",
+					"parameters": []map[string]interface{}{
+						{
+							"name": "id", "in": "path", "required": true,
+							"description": "对话ID",
+							"schema": map[string]interface{}{"type": "string"},
+						},
+					},
+					"requestBody": map[string]interface{}{
+						"required": true,
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]interface{}{
+									"$ref": "#/components/schemas/SetConversationProjectRequest",
+								},
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{"description": "设置成功"},
+						"400": map[string]interface{}{"description": "项目不存在或参数错误"},
+						"404": map[string]interface{}{"description": "对话不存在"},
+						"401": map[string]interface{}{"description": "未授权"},
+					},
+				},
+			},
 			"/api/conversations/{id}/results": map[string]interface{}{
 				"get": map[string]interface{}{
 					"tags":        []string{"对话管理"},
@@ -2444,6 +2493,86 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 					},
 				},
 			},
+			"/api/projects": map[string]interface{}{
+				"get": map[string]interface{}{
+					"tags":        []string{"项目管理"},
+					"summary":     "列出项目",
+					"operationId": "listProjects",
+					"parameters": []map[string]interface{}{
+						{"name": "status", "in": "query", "schema": map[string]interface{}{"type": "string", "enum": []string{"active", "archived"}}},
+						{"name": "limit", "in": "query", "schema": map[string]interface{}{"type": "integer", "default": 200}},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{"description": "项目列表"},
+						"401": map[string]interface{}{"description": "未授权"},
+					},
+				},
+				"post": map[string]interface{}{
+					"tags":        []string{"项目管理"},
+					"summary":     "创建项目",
+					"operationId": "createProject",
+					"requestBody": map[string]interface{}{
+						"required": true,
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]interface{}{
+									"type": "object",
+									"properties": map[string]interface{}{
+										"name":        map[string]interface{}{"type": "string"},
+										"description": map[string]interface{}{"type": "string"},
+										"scope_json":  map[string]interface{}{"type": "string"},
+									},
+									"required": []string{"name"},
+								},
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{"description": "创建成功"},
+						"401": map[string]interface{}{"description": "未授权"},
+					},
+				},
+			},
+			"/api/projects/{id}": map[string]interface{}{
+				"get": map[string]interface{}{
+					"tags": []string{"项目管理"}, "summary": "获取项目", "operationId": "getProject",
+					"parameters": []map[string]interface{}{
+						{"name": "id", "in": "path", "required": true, "schema": map[string]interface{}{"type": "string"}},
+					},
+					"responses": map[string]interface{}{"200": map[string]interface{}{"description": "项目详情"}},
+				},
+				"put": map[string]interface{}{
+					"tags": []string{"项目管理"}, "summary": "更新项目", "operationId": "updateProject",
+					"parameters": []map[string]interface{}{
+						{"name": "id", "in": "path", "required": true, "schema": map[string]interface{}{"type": "string"}},
+					},
+					"responses": map[string]interface{}{"200": map[string]interface{}{"description": "更新成功"}},
+				},
+				"delete": map[string]interface{}{
+					"tags": []string{"项目管理"}, "summary": "删除项目", "operationId": "deleteProject",
+					"parameters": []map[string]interface{}{
+						{"name": "id", "in": "path", "required": true, "schema": map[string]interface{}{"type": "string"}},
+					},
+					"responses": map[string]interface{}{"200": map[string]interface{}{"description": "删除成功"}},
+				},
+			},
+			"/api/projects/{id}/facts": map[string]interface{}{
+				"get": map[string]interface{}{
+					"tags": []string{"项目管理"}, "summary": "列出或按 key 获取事实", "operationId": "listProjectFacts",
+					"parameters": []map[string]interface{}{
+						{"name": "id", "in": "path", "required": true, "schema": map[string]interface{}{"type": "string"}},
+						{"name": "fact_key", "in": "query", "schema": map[string]interface{}{"type": "string"}},
+					},
+					"responses": map[string]interface{}{"200": map[string]interface{}{"description": "事实列表或单条"}},
+				},
+				"post": map[string]interface{}{
+					"tags": []string{"项目管理"}, "summary": "创建/更新事实", "operationId": "upsertProjectFactREST",
+					"parameters": []map[string]interface{}{
+						{"name": "id", "in": "path", "required": true, "schema": map[string]interface{}{"type": "string"}},
+					},
+					"responses": map[string]interface{}{"200": map[string]interface{}{"description": "成功"}},
+				},
+			},
 			"/api/vulnerabilities": map[string]interface{}{
 				"get": map[string]interface{}{
 					"tags":        []string{"漏洞管理"},
@@ -2498,6 +2627,15 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 							"in":          "query",
 							"required":    false,
 							"description": "对话ID",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+						{
+							"name":        "project_id",
+							"in":          "query",
+							"required":    false,
+							"description": "项目ID",
 							"schema": map[string]interface{}{
 								"type": "string",
 							},
