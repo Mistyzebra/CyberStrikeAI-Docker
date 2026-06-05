@@ -493,6 +493,63 @@ func (db *DB) UpdateToolStats(toolName string, totalCalls, successCalls, failedC
 	return nil
 }
 
+// CallsTimelineBucket 调用趋势时间桶
+type CallsTimelineBucket struct {
+	BucketTime time.Time
+	Total      int
+	Failed     int
+}
+
+// LoadCallsTimeline 按时间范围加载调用趋势（since 起至今，含边界）
+func (db *DB) LoadCallsTimeline(since time.Time, dailyBuckets bool) ([]CallsTimelineBucket, error) {
+	var bucketExpr string
+	if dailyBuckets {
+		bucketExpr = `strftime('%Y-%m-%d 00:00:00', start_time)`
+	} else {
+		bucketExpr = `strftime('%Y-%m-%d %H:00:00', start_time)`
+	}
+
+	query := `
+		SELECT ` + bucketExpr + ` AS bucket,
+			COUNT(*) AS total,
+			SUM(CASE WHEN status IN ('failed', 'cancelled') THEN 1 ELSE 0 END) AS failed
+		FROM tool_executions
+		WHERE start_time >= ?
+		GROUP BY bucket
+		ORDER BY bucket ASC
+	`
+
+	rows, err := db.Query(query, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var buckets []CallsTimelineBucket
+	for rows.Next() {
+		var bucketStr string
+		var total, failed int
+		if err := rows.Scan(&bucketStr, &total, &failed); err != nil {
+			db.logger.Warn("加载调用趋势失败", zap.Error(err))
+			continue
+		}
+		t, parseErr := time.ParseInLocation("2006-01-02 15:04:05", bucketStr, time.Local)
+		if parseErr != nil {
+			t, parseErr = time.Parse("2006-01-02 15:04:05", bucketStr)
+			if parseErr != nil {
+				db.logger.Warn("解析趋势时间桶失败", zap.String("bucket", bucketStr), zap.Error(parseErr))
+				continue
+			}
+		}
+		buckets = append(buckets, CallsTimelineBucket{
+			BucketTime: t,
+			Total:      total,
+			Failed:     failed,
+		})
+	}
+	return buckets, nil
+}
+
 // DecreaseToolStats 减少工具统计信息（用于删除执行记录时）
 // 如果统计信息变为0，则删除该统计记录
 func (db *DB) DecreaseToolStats(toolName string, totalCalls, successCalls, failedCalls int) error {

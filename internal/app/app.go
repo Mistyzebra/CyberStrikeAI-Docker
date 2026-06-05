@@ -880,6 +880,7 @@ func setupRoutes(
 		protected.DELETE("/monitor/execution/:id", monitorHandler.DeleteExecution)
 		protected.DELETE("/monitor/executions", monitorHandler.DeleteExecutions)
 		protected.GET("/monitor/stats", monitorHandler.GetStats)
+		protected.GET("/monitor/calls-timeline", monitorHandler.GetCallsTimeline)
 		protected.GET("/notifications/summary", notificationHandler.GetSummary)
 		protected.POST("/notifications/read", notificationHandler.MarkRead)
 
@@ -1065,6 +1066,7 @@ func setupRoutes(
 		// 漏洞管理
 		protected.GET("/vulnerabilities", vulnerabilityHandler.ListVulnerabilities)
 		protected.GET("/vulnerabilities/export", vulnerabilityHandler.ExportVulnerabilities)
+		protected.DELETE("/vulnerabilities/batch", vulnerabilityHandler.BatchDeleteVulnerabilities)
 		protected.GET("/vulnerabilities/filter-options", vulnerabilityHandler.GetVulnerabilityFilterOptions)
 		protected.GET("/vulnerabilities/stats", vulnerabilityHandler.GetVulnerabilityStats)
 		protected.GET("/vulnerabilities/:id", vulnerabilityHandler.GetVulnerability)

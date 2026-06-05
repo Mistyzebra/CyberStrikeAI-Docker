@@ -327,6 +327,124 @@ func (h *MonitorHandler) GetStats(c *gin.Context) {
 	c.JSON(http.StatusOK, stats)
 }
 
+// CallsTimelinePoint 调用趋势数据点
+type CallsTimelinePoint struct {
+	T      time.Time `json:"t"`
+	Total  int       `json:"total"`
+	Failed int       `json:"failed"`
+}
+
+// CallsTimelineSummary 调用趋势汇总
+type CallsTimelineSummary struct {
+	TotalCalls int `json:"totalCalls"`
+	Peak       int `json:"peak"`
+}
+
+// CallsTimelineResponse 调用趋势响应
+type CallsTimelineResponse struct {
+	Range   string               `json:"range"`
+	Points  []CallsTimelinePoint `json:"points"`
+	Summary CallsTimelineSummary `json:"summary"`
+}
+
+type callsTimelineConfig struct {
+	rangeKey     string
+	duration     time.Duration
+	bucketSize   time.Duration
+	dailyBuckets bool
+}
+
+func parseCallsTimelineRange(raw string) (callsTimelineConfig, bool) {
+	switch strings.TrimSpace(raw) {
+	case "24h":
+		return callsTimelineConfig{rangeKey: "24h", duration: 24 * time.Hour, bucketSize: time.Hour, dailyBuckets: false}, true
+	case "30d":
+		return callsTimelineConfig{rangeKey: "30d", duration: 30 * 24 * time.Hour, bucketSize: 24 * time.Hour, dailyBuckets: true}, true
+	default:
+		return callsTimelineConfig{rangeKey: "7d", duration: 7 * 24 * time.Hour, bucketSize: time.Hour, dailyBuckets: false}, true
+	}
+}
+
+func truncateToBucket(t time.Time, bucketSize time.Duration, dailyBuckets bool) time.Time {
+	if dailyBuckets {
+		y, m, d := t.Date()
+		return time.Date(y, m, d, 0, 0, 0, 0, t.Location())
+	}
+	return t.Truncate(bucketSize)
+}
+
+func buildCallsTimelinePoints(cfg callsTimelineConfig, buckets map[time.Time]struct{ total, failed int }) []CallsTimelinePoint {
+	now := time.Now()
+	start := truncateToBucket(now.Add(-cfg.duration), cfg.bucketSize, cfg.dailyBuckets)
+	end := truncateToBucket(now, cfg.bucketSize, cfg.dailyBuckets)
+
+	points := make([]CallsTimelinePoint, 0)
+	for current := start; !current.After(end); current = current.Add(cfg.bucketSize) {
+		val := buckets[current]
+		points = append(points, CallsTimelinePoint{
+			T:      current,
+			Total:  val.total,
+			Failed: val.failed,
+		})
+	}
+	return points
+}
+
+func (h *MonitorHandler) loadCallsTimeline(cfg callsTimelineConfig) []CallsTimelinePoint {
+	since := time.Now().Add(-cfg.duration)
+	bucketMap := make(map[time.Time]struct{ total, failed int })
+
+	if h.db != nil {
+		dbBuckets, err := h.db.LoadCallsTimeline(since, cfg.dailyBuckets)
+		if err != nil {
+			h.logger.Warn("从数据库加载调用趋势失败，回退到内存数据", zap.Error(err))
+		} else {
+			for _, b := range dbBuckets {
+				key := truncateToBucket(b.BucketTime, cfg.bucketSize, cfg.dailyBuckets)
+				entry := bucketMap[key]
+				entry.total += b.Total
+				entry.failed += b.Failed
+				bucketMap[key] = entry
+			}
+			return buildCallsTimelinePoints(cfg, bucketMap)
+		}
+	}
+
+	for _, exec := range h.mcpServer.GetAllExecutions() {
+		if exec == nil || exec.StartTime.Before(since) {
+			continue
+		}
+		key := truncateToBucket(exec.StartTime, cfg.bucketSize, cfg.dailyBuckets)
+		entry := bucketMap[key]
+		entry.total++
+		if exec.Status == "failed" || exec.Status == "cancelled" {
+			entry.failed++
+		}
+		bucketMap[key] = entry
+	}
+	return buildCallsTimelinePoints(cfg, bucketMap)
+}
+
+// GetCallsTimeline 获取 MCP 工具调用趋势
+func (h *MonitorHandler) GetCallsTimeline(c *gin.Context) {
+	cfg, _ := parseCallsTimelineRange(c.Query("range"))
+	points := h.loadCallsTimeline(cfg)
+
+	summary := CallsTimelineSummary{}
+	for _, p := range points {
+		summary.TotalCalls += p.Total
+		if p.Total > summary.Peak {
+			summary.Peak = p.Total
+		}
+	}
+
+	c.JSON(http.StatusOK, CallsTimelineResponse{
+		Range:   cfg.rangeKey,
+		Points:  points,
+		Summary: summary,
+	})
+}
+
 // DeleteExecution 删除执行记录
 func (h *MonitorHandler) DeleteExecution(c *gin.Context) {
 	id := c.Param("id")
