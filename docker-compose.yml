@@ -1,0 +1,12 @@
+services:
+  cyberstrike-ai:
+    build: .
+    image: cyberstrike-ai:local
+    container_name: cyberstrike-ai
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    volumes:
+      - ./data:/app/data
+      - ./config.yaml:/app/config.yaml
+    restart: unless-stopped
